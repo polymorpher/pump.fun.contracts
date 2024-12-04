@@ -139,8 +139,8 @@ async function test() {
     await getTokenBalances(tokenB);
 
     await sendTxn(
-        tokenFactory.burnTokenAndMintWinner(tokenB),
-        "tokenFactory.burnTokenAndMintWinner for Winner"
+        tokenFactory.publishToUniswap(tokenB),
+        "tokenFactory.publishToUniswap for Winner"
     );    
 
     await getTokenBalances(tokenA);

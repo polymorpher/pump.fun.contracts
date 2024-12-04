@@ -20,7 +20,6 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     uint256 public constant MAX_SUPPLY = 10 ** 9 * 1 ether; // 1 Billion
     uint256 public constant INITIAL_SUPPLY = (MAX_SUPPLY * 1) / 5;
     uint256 public constant FUNDING_SUPPLY = (MAX_SUPPLY * 4) / 5;
-    uint256 public constant FUNDING_GOAL = 20 ether;
     uint256 public constant FEE_DENOMINATOR = 10000;
 
     mapping(address => TokenState) public tokens;
@@ -193,12 +192,9 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         uint256 _competitionId = competitionIds[tokenAddress];
         uint256 tokenCollateral = collateralById[_competitionId][tokenAddress];
 
-        uint256 remainingEthNeeded = FUNDING_GOAL - tokenCollateral;
         uint256 contributionWithoutFee = (valueToBuy * FEE_DENOMINATOR) /
             (FEE_DENOMINATOR + feePercent);
-        if (contributionWithoutFee > remainingEthNeeded) {
-            contributionWithoutFee = remainingEthNeeded;
-        }
+
         uint256 _fee = calculateFee(contributionWithoutFee, feePercent);
         uint256 totalCharged = contributionWithoutFee + _fee;
         valueToReturn = valueToBuy > totalCharged
@@ -301,6 +297,17 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         return winnerAddress;
     }
 
+    function getCollateralByCompetitionId(uint256 competitionId) public view returns (uint256) {
+        uint256 collateral = 0;
+
+        for (uint256 i = 0; i < tokensByCompetitionId[competitionId].length; i++) {
+            address tokenAddress = tokensByCompetitionId[competitionId][i];
+            collateral += collateralById[competitionId][tokenAddress];
+        }
+
+        return collateral;
+    }
+
     function setWinnerByCompetitionId(uint256 competitionId) external {
         require(competitionId != currentCompetitionId, 'The competition is still active');
 
@@ -312,72 +319,90 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         }
     }
 
-    function burnTokenAndMintWinner(
+    function publishToUniswap (
         address tokenAddress
     ) external nonReentrant {
         uint256 _competitionId = competitionIds[tokenAddress];
-        
+
         require(_competitionId != currentCompetitionId, 'The competition is still active');
 
         address winnerToken = getWinnerByCompetitionId(_competitionId);
 
+        require(winnerToken == tokenAddress, 'Token address not winner');
+
+        uint256 totalCollateral = getCollateralByCompetitionId(_competitionId);
+        WETH.deposit{value: totalCollateral}();
+
+        // calulate winner token amount
+        uint256 contributionWithoutFee = (totalCollateral * FEE_DENOMINATOR) /
+            (FEE_DENOMINATOR + feePercent);
+
+        uint256 winnerTokenAmount = bondingCurve.computeMintingAmountFromPrice(
+            totalCollateral,
+            Token(tokenAddress).totalSupply(),
+            contributionWithoutFee
+        );
+    
+        Token(tokenAddress).mint(address(this), winnerTokenAmount);
+        
+        // token creator will get liquidity pull tokenId
+        (
+            address pool,
+            uint256 tokenId, 
+            uint128 liquidity, 
+            uint256 amount0, 
+            uint256 amount1
+        ) = tokenAddress < address(WETH) ? 
+            _addLiquidity(tokenAddress, winnerTokenAmount, address(WETH), totalCollateral, tokensCreators[tokenAddress]):
+            _addLiquidity(address(WETH), totalCollateral, tokenAddress, winnerTokenAmount, tokensCreators[tokenAddress]);
+
+        tokensPools[tokenAddress] = pool;
+
+        emit WinnerLiquidityAdded(
+            tokenAddress,
+            tokensCreators[tokenAddress],
+            pool,
+            msg.sender,
+            tokenId,
+            liquidity,
+            amount0,
+            amount1,
+            block.timestamp
+        );
+    }
+
+    function burnTokenAndMintWinner(
+        address tokenAddress
+    ) external nonReentrant {
+        uint256 _competitionId = competitionIds[tokenAddress];
+
+        require(_competitionId != currentCompetitionId, 'The competition is still active');
+
+        address winnerToken = getWinnerByCompetitionId(_competitionId);
+
+        require(winnerToken != tokenAddress, 'Token address is winner');
+
         Token token = Token(tokenAddress);
 
-        if(winnerToken == tokenAddress) {
-            address pool = _createLiquilityPool(tokenAddress);
+        uint256 burnedAmount = token.balanceOf(msg.sender);
 
-            tokensPools[tokenAddress] = pool;
+        uint256 receivedETH = _sell(
+            tokenAddress,
+            burnedAmount,
+            msg.sender,
+            address(this)
+        );
 
-            uint256 ethAmount = collateralById[_competitionId][tokenAddress];
+        uint256 mintedAmount = _buy(winnerToken, msg.sender, receivedETH);
 
-            address creator = tokensCreators[tokenAddress];
-            uint256 creatorBalance = token.balanceOf(creator);
-
-            // burned all creator tokens    
-            token.burn(creator, creatorBalance);
-
-            token.mint(address(this), INITIAL_SUPPLY);
-            
-            // token creator will get liquidity pull tokenId
-            (
-                uint256 tokenId, 
-                uint128 liquidity, 
-                uint256 amount0, 
-                uint256 amount1
-            ) = _addLiquidity(tokenAddress, INITIAL_SUPPLY, ethAmount, tokensCreators[tokenAddress]);
-
-            emit WinnerLiquidityAdded(
-                tokenAddress,
-                tokensCreators[tokenAddress],
-                pool,
-                msg.sender,
-                tokenId,
-                liquidity,
-                amount0,
-                amount1,
-                block.timestamp
-            );
-        } else {
-            uint256 burnedAmount = token.balanceOf(msg.sender);
-
-            uint256 receivedETH = _sell(
-                tokenAddress,
-                burnedAmount,
-                msg.sender,
-                address(this)
-            );
-
-            uint256 mintedAmount = _buy(winnerToken, msg.sender, receivedETH);
-
-            emit BurnTokenAndMintWinner(
-                msg.sender,
-                tokenAddress,
-                winnerToken,
-                burnedAmount,
-                receivedETH,
-                mintedAmount,
-                block.timestamp
-            );
-        }
+        emit BurnTokenAndMintWinner(
+            msg.sender,
+            tokenAddress,
+            winnerToken,
+            burnedAmount,
+            receivedETH,
+            mintedAmount,
+            block.timestamp
+        );
     }
 }
