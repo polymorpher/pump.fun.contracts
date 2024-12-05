@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.26;
 
 import "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -226,6 +226,45 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         emit TokenBuy(tokenAddress, valueToBuy, amount, fee, block.timestamp);
 
         return (amount);
+    }
+
+    function _buyReceivedAmount(
+        address tokenAddress,
+        uint256 valueToBuy
+    ) public view returns (uint256) {
+        uint256 contributionWithoutFee = (valueToBuy * FEE_DENOMINATOR) /
+            (FEE_DENOMINATOR + feePercent);
+
+        Token token = Token(tokenAddress);
+        uint256 _competitionId = competitionIds[tokenAddress];
+
+        uint256 amount = bondingCurve.computeMintingAmountFromPrice(
+            collateralById[_competitionId][tokenAddress],
+            token.totalSupply(),
+            contributionWithoutFee
+        );
+
+        return (amount);
+    }
+
+    function _sellReceivedAmount(
+        address tokenAddress,
+        uint256 amount
+    ) public view returns (uint256) {
+        Token token = Token(tokenAddress);
+        uint256 _competitionId = competitionIds[tokenAddress];
+
+        uint256 receivedETH = bondingCurve.computeRefundForBurning(
+            collateralById[_competitionId][tokenAddress],
+            token.totalSupply(),
+            amount
+        );
+
+        // calculate fee
+        uint256 _fee = calculateFee(receivedETH, feePercent);
+        receivedETH -= _fee;
+
+        return receivedETH;
     }
 
     function sell(address tokenAddress, uint256 amount) external nonReentrant inCompetition(tokenAddress) {

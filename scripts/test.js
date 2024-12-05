@@ -81,6 +81,11 @@ async function test() {
     await getTokenBalances(tokenA);
     await getTokenBalances(tokenB);
 
+    console.log(
+        '_buyReceivedAmount: ', 
+        await tokenFactory._buyReceivedAmount(tokenA, expandDecimals(1, 14))
+    );
+
     // buy token for ONE
     await sendTxn(
         tokenFactory.buy(tokenA, { value: expandDecimals(1, 14) }),
@@ -106,6 +111,11 @@ async function test() {
     //     totalSupplyA,
     //     totalSupplyA - 100 // expandDecimals(1, 21)
     // ));
+
+    console.log(
+        '_sellReceivedAmount: ', 
+        await tokenFactory._sellReceivedAmount(tokenA, totalSupplyA - 100)
+    );
 
     // buy token for ONE
     await sendTxn(
