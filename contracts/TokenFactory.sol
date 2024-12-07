@@ -73,7 +73,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     );
 
     event SetWinner(
-        address indexed winner, 
+        address indexed winner,
         uint256 competitionId,
         uint256 timestamp
     );
@@ -93,9 +93,9 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         address indexed tokenCreator,
         address indexed pool,
         address sender,
-        uint256 tokenId, 
-        uint128 liquidity, 
-        uint256 amount0, 
+        uint256 tokenId,
+        uint128 liquidity,
+        uint256 amount0,
         uint256 amount1,
         uint256 timestamp
     );
@@ -282,7 +282,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
             "Token is not funding"
         );
         require(amount > 0, "Amount should be greater than zero");
-        
+
         Token token = Token(tokenAddress);
         uint256 _competitionId = competitionIds[tokenAddress];
 
@@ -361,16 +361,20 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     function publishToUniswap (
         address tokenAddress
     ) external nonReentrant {
-        uint256 _competitionId = competitionIds[tokenAddress];
+        uint256 totalCollateral;
+        {
+            uint256 _competitionId = competitionIds[tokenAddress];
 
-        require(_competitionId != currentCompetitionId, 'The competition is still active');
+            require(_competitionId != currentCompetitionId, 'The competition is still active');
 
-        address winnerToken = getWinnerByCompetitionId(_competitionId);
+            address winnerToken = getWinnerByCompetitionId(_competitionId);
 
-        require(winnerToken == tokenAddress, 'Token address not winner');
+            require(winnerToken == tokenAddress, 'Token address not winner');
 
-        uint256 totalCollateral = getCollateralByCompetitionId(_competitionId);
-        WETH.deposit{value: totalCollateral}();
+            totalCollateral = getCollateralByCompetitionId(_competitionId);
+
+            WETH.deposit{value: totalCollateral}();
+        }
 
         // calulate winner token amount
         uint256 contributionWithoutFee = (totalCollateral * FEE_DENOMINATOR) /
@@ -381,17 +385,17 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
             Token(tokenAddress).totalSupply(),
             contributionWithoutFee
         );
-    
+
         Token(tokenAddress).mint(address(this), winnerTokenAmount);
-        
+
         // token creator will get liquidity pull tokenId
         (
             address pool,
-            uint256 tokenId, 
-            uint128 liquidity, 
-            uint256 amount0, 
+            uint256 tokenId,
+            uint128 liquidity,
+            uint256 amount0,
             uint256 amount1
-        ) = tokenAddress < address(WETH) ? 
+        ) = tokenAddress < address(WETH) ?
             _addLiquidity(tokenAddress, winnerTokenAmount, address(WETH), totalCollateral, tokensCreators[tokenAddress]):
             _addLiquidity(address(WETH), totalCollateral, tokenAddress, winnerTokenAmount, tokensCreators[tokenAddress]);
 
