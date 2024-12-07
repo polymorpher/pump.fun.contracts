@@ -128,7 +128,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         require(paymentAmount > 0, "ETH not enough");
 
         Token token = Token(tokenAddress);
-        (uint256 paymentWithoutFee, uint256 _fee) = _getCollateralAmountAndFee(tokenAddress, paymentAmount);
+        (uint256 paymentWithoutFee, uint256 _fee) = _getCollateralAmountAndFee(paymentAmount);
         uint256 tokenAmount = _getBuyTokenAmount(tokenAddress, paymentWithoutFee);
         collateralById[_competitionId][tokenAddress] += paymentWithoutFee;
         fee += _fee;
@@ -137,8 +137,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         return tokenAmount;
     }
 
-    function _getCollateralAmountAndFee(address tokenAddress, uint256 paymentAmount) internal view returns (uint256 paymentWithoutFee, uint256 _fee) {
-        uint256 _competitionId = competitionIds[tokenAddress];
+    function _getCollateralAmountAndFee(uint256 paymentAmount) internal view returns (uint256 paymentWithoutFee, uint256 _fee) {
         _fee = calculateFee(paymentAmount, feePercent);
         paymentWithoutFee = paymentAmount - _fee;
     }
@@ -150,7 +149,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     }
 
     function _buyReceivedAmount(address tokenAddress, uint256 paymentAmount) public view returns (uint256 tokenAmount) {
-        (uint256 paymentWithoutFee, ) = _getCollateralAmountAndFee(tokenAddress, paymentAmount);
+        (uint256 paymentWithoutFee, ) = _getCollateralAmountAndFee(paymentAmount);
         return _getBuyTokenAmount(tokenAddress, paymentWithoutFee);
     }
 
@@ -214,14 +213,18 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     }
 
     function getCollateralByCompetitionId(uint256 competitionId) public view returns (uint256) {
-        uint256 collateral = 0;
-
+        uint256 collateralWithoutFee = 0;
+        address winnerTokenAddress = getWinnerByCompetitionId(competitionId);
         for (uint256 i = 0; i < tokensByCompetitionId[competitionId].length; i++) {
             address tokenAddress = tokensByCompetitionId[competitionId][i];
-            collateral += collateralById[competitionId][tokenAddress];
+            if (winnerTokenAddress == tokenAddress) {
+                collateralWithoutFee += collateralById[competitionId][tokenAddress];
+            } else {
+                (uint256 paymentWithoutFee, ) = _getCollateralAmountAndFee(collateralById[competitionId][tokenAddress]);
+                collateralWithoutFee += paymentWithoutFee;
+            }
         }
-
-        return collateral;
+        return collateralWithoutFee;
     }
 
     function setWinnerByCompetitionId(uint256 competitionId) external {
@@ -239,15 +242,10 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         uint256 totalCollateral;
         {
             uint256 _competitionId = competitionIds[tokenAddress];
-
             require(_competitionId != currentCompetitionId, "The competition is still active");
-
             address winnerToken = getWinnerByCompetitionId(_competitionId);
-
             require(winnerToken == tokenAddress, "Token address not winner");
-
             totalCollateral = getCollateralByCompetitionId(_competitionId);
-
             WETH.deposit{value: totalCollateral}();
         }
 
