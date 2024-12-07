@@ -11,20 +11,11 @@ import {BancorBondingCurve} from "./BancorBondingCurve.sol";
 import {Token} from "./Token.sol";
 
 contract TokenFactory is ReentrancyGuard, LiquidityManager {
-    enum TokenState {
-        NOT_CREATED,
-        FUNDING,
-        TRADING
-    }
-
     uint256 public constant FEE_DENOMINATOR = 10000;
-
-    mapping(address => TokenState) public tokens;
-
     mapping(uint256 => address[]) public tokensByCompetitionId;
 
     mapping(address => uint256) public competitionIds;
-    uint256 public currentCompetitionId = 0;
+    uint256 public currentCompetitionId = 1;
 
     address public immutable tokenImplementation;
     BancorBondingCurve public bondingCurve;
@@ -153,7 +144,6 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         address tokenAddress = Clones.clone(tokenImplementation);
         Token token = Token(tokenAddress);
         token.initialize(name, symbol, uri, address(this));
-        tokens[tokenAddress] = TokenState.FUNDING;
 
         tokensByCompetitionId[currentCompetitionId].push(tokenAddress);
 
@@ -182,16 +172,17 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         address receiver,
         uint256 paymentAmount
     ) internal returns (uint256) {
-        require(tokens[tokenAddress] == TokenState.FUNDING, "Token not found");
-        require(paymentAmount > 0, "ETH not enough");
         uint256 _competitionId = competitionIds[tokenAddress];
+        require(_competitionId > 0, "Token not found");
+        require(paymentAmount > 0, "ETH not enough");
+
         Token token = Token(tokenAddress);
         (uint256 paymentWithoutFee, uint256 _fee) = _getCollateralAmountAndFee(tokenAddress, paymentAmount);
         uint256 tokenAmount = _getBuyTokenAmount(tokenAddress, paymentWithoutFee);
         collateralById[_competitionId][tokenAddress] += paymentWithoutFee;
         fee += _fee;
         token.mint(receiver, tokenAmount);
-        emit TokenBuy(tokenAddress, paymentAmount, tokenAmount, fee, block.timestamp);
+        emit TokenBuy(tokenAddress, paymentWithoutFee, tokenAmount, _fee, block.timestamp);
         return tokenAmount;
     }
 
@@ -245,44 +236,34 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
 
     function _sell(
         address tokenAddress,
-        uint256 amount,
+        uint256 tokenAmount,
         address from,
         address to
     ) internal returns (uint256) {
-        require(
-            tokens[tokenAddress] == TokenState.FUNDING,
-            "Token is not funding"
-        );
-        require(amount > 0, "Amount should be greater than zero");
-
+        uint256 _competitionId = competitionIds[tokenAddress];
+        require(_competitionId > 0, "Token not found");
+        require(tokenAmount > 0, "Amount should be greater than zero");
         Token token = Token(tokenAddress);
         uint256 _competitionId = competitionIds[tokenAddress];
-
-        uint256 receivedETH = bondingCurve.computeRefundForBurning(
+        uint256 paymentAmountWithFee = bondingCurve.computeRefundForBurning(
             collateralById[_competitionId][tokenAddress],
             token.totalSupply(),
-            amount
+            tokenAmount
         );
-        // calculate fee
-        uint256 _fee = calculateFee(receivedETH, feePercent);
-        receivedETH -= _fee;
-        fee += _fee;
-        token.burn(from, amount);
-        collateralById[_competitionId][tokenAddress] -= receivedETH;
-        // send ether
-        //slither-disable-next-line arbitrary-send-eth
+        collateralById[_competitionId][tokenAddress] -= paymentAmountWithFee;
 
+        uint256 _fee = calculateFee(paymentAmountWithFee, feePercent);
+        uint256 paymentAmountWithoutFee = paymentAmountWithFee - _fee;
+        fee += _fee;
+        token.burn(from, tokenAmount);
         if (to != address(this)) {
-            (bool success,) = to.call{value: receivedETH}(new bytes(0));
+            //slither-disable-next-line arbitrary-send-eth
+            (bool success,) = to.call{value: paymentAmountWithoutFee}(new bytes(0));
             require(success, "ETH send failed");
         }
-
-        emit TokenSell(tokenAddress, amount, receivedETH, fee, block.timestamp);
-
-        return receivedETH;
+        emit TokenSell(tokenAddress, tokenAmount, paymentAmountWithoutFee, _fee, block.timestamp);
+        return paymentAmountWithoutFee;
     }
-
-    // Internal functions
 
     function calculateFee(
         uint256 _amount,
