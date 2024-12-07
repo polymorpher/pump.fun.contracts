@@ -17,9 +17,6 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         TRADING
     }
 
-    uint256 public constant MAX_SUPPLY = 10 ** 9 * 1 ether; // 1 Billion
-    uint256 public constant INITIAL_SUPPLY = (MAX_SUPPLY * 1) / 5;
-    uint256 public constant FUNDING_SUPPLY = (MAX_SUPPLY * 4) / 5;
     uint256 public constant FEE_DENOMINATOR = 10000;
 
     mapping(address => TokenState) public tokens;
@@ -141,7 +138,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     }
 
     function claimFee() external onlyOwner {
-        (bool success, ) = msg.sender.call{value: fee}(new bytes(0));
+        (bool success,) = msg.sender.call{value: fee}(new bytes(0));
         require(success, "ETH send failed");
         fee = 0;
     }
@@ -183,68 +180,43 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     function _buy(
         address tokenAddress,
         address receiver,
-        uint256 valueToBuy
+        uint256 paymentAmount
     ) internal returns (uint256) {
         require(tokens[tokenAddress] == TokenState.FUNDING, "Token not found");
-        require(valueToBuy > 0, "ETH not enough");
-        // calculate fee
-        uint256 valueToReturn;
+        require(paymentAmount > 0, "ETH not enough");
         uint256 _competitionId = competitionIds[tokenAddress];
-        uint256 tokenCollateral = collateralById[_competitionId][tokenAddress];
-
-        uint256 contributionWithoutFee = (valueToBuy * FEE_DENOMINATOR) /
-            (FEE_DENOMINATOR + feePercent);
-
-        uint256 _fee = calculateFee(contributionWithoutFee, feePercent);
-        uint256 totalCharged = contributionWithoutFee + _fee;
-        valueToReturn = valueToBuy > totalCharged
-            ? valueToBuy - totalCharged
-            : 0;
-        fee += _fee;
         Token token = Token(tokenAddress);
-        uint256 amount = bondingCurve.computeMintingAmountFromPrice(
+        (uint256 paymentWithoutFee, uint256 _fee) = _getCollateralAmountAndFee(tokenAddress, paymentAmount);
+        uint256 tokenAmount = _getBuyTokenAmount(tokenAddress, paymentWithoutFee);
+        collateralById[_competitionId][tokenAddress] += paymentWithoutFee;
+        fee += _fee;
+        token.mint(receiver, tokenAmount);
+        emit TokenBuy(tokenAddress, paymentAmount, tokenAmount, fee, block.timestamp);
+        return tokenAmount;
+    }
+
+    function _getCollateralAmountAndFee(address tokenAddress, uint256 paymentAmount) internal view returns (uint256 paymentWithoutFee, uint256 _fee){
+        uint256 _competitionId = competitionIds[tokenAddress];
+        _fee = calculateFee(paymentAmount, feePercent);
+        paymentWithoutFee = paymentAmount - _fee;
+    }
+
+    function _getBuyTokenAmount(address tokenAddress, uint256 paymentWithoutFee) internal view returns (uint256){
+        Token token = Token(tokenAddress);
+        uint256 _competitionId = competitionIds[tokenAddress];
+        return bondingCurve.computeMintingAmountFromPrice(
             collateralById[_competitionId][tokenAddress],
             token.totalSupply(),
-            contributionWithoutFee
+            paymentWithoutFee
         );
-        uint256 availableSupply = FUNDING_SUPPLY - token.totalSupply();
-        require(amount <= availableSupply, "Token supply not enough");
-        tokenCollateral += contributionWithoutFee;
-        token.mint(receiver, amount);
-
-        collateralById[_competitionId][tokenAddress] = tokenCollateral;
-
-        // TODO - return left not working for burnTokenAndMintWinner case
-        // return left
-        // if (valueToReturn > 0) {
-        //     (bool success, ) = receiver.call{value: amount - valueToBuy}(
-        //         new bytes(0)
-        //     );
-        //     require(success, "ETH send failed");
-        // }
-
-        emit TokenBuy(tokenAddress, valueToBuy, amount, fee, block.timestamp);
-
-        return (amount);
     }
 
     function _buyReceivedAmount(
         address tokenAddress,
-        uint256 valueToBuy
-    ) public view returns (uint256) {
-        uint256 contributionWithoutFee = (valueToBuy * FEE_DENOMINATOR) /
-            (FEE_DENOMINATOR + feePercent);
-
-        Token token = Token(tokenAddress);
-        uint256 _competitionId = competitionIds[tokenAddress];
-
-        uint256 amount = bondingCurve.computeMintingAmountFromPrice(
-            collateralById[_competitionId][tokenAddress],
-            token.totalSupply(),
-            contributionWithoutFee
-        );
-
-        return (amount);
+        uint256 paymentAmount
+    ) public view returns (uint256 tokenAmount) {
+        (uint256 paymentWithoutFee,) = _getCollateralAmountAndFee(tokenAddress, paymentAmount);
+        return _getBuyTokenAmount(tokenAddress, paymentWithoutFee);
     }
 
     function _sellReceivedAmount(
@@ -301,7 +273,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         //slither-disable-next-line arbitrary-send-eth
 
         if (to != address(this)) {
-            (bool success, ) = to.call{value: receivedETH}(new bytes(0));
+            (bool success,) = to.call{value: receivedETH}(new bytes(0));
             require(success, "ETH send failed");
         }
 
@@ -352,13 +324,13 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
 
         address winnerAddress = getWinnerByCompetitionId(competitionId);
 
-        if(winners[competitionId] != winnerAddress) {
+        if (winners[competitionId] != winnerAddress) {
             winners[competitionId] = winnerAddress;
             emit SetWinner(winnerAddress, competitionId, block.timestamp);
         }
     }
 
-    function publishToUniswap (
+    function publishToUniswap(
         address tokenAddress
     ) external nonReentrant {
         uint256 totalCollateral;
@@ -396,7 +368,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
             uint256 amount0,
             uint256 amount1
         ) = tokenAddress < address(WETH) ?
-            _addLiquidity(tokenAddress, winnerTokenAmount, address(WETH), totalCollateral, tokensCreators[tokenAddress]):
+            _addLiquidity(tokenAddress, winnerTokenAmount, address(WETH), totalCollateral, tokensCreators[tokenAddress]) :
             _addLiquidity(address(WETH), totalCollateral, tokenAddress, winnerTokenAmount, tokensCreators[tokenAddress]);
 
         tokensPools[tokenAddress] = pool;
