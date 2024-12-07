@@ -175,7 +175,6 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         require(_competitionId > 0, "Token not found");
         require(tokenAmount > 0, "Amount should be greater than zero");
         Token token = Token(tokenAddress);
-        uint256 _competitionId = competitionIds[tokenAddress];
         uint256 paymentAmountWithFee = bondingCurve.computeRefundForBurning(collateralById[_competitionId][tokenAddress], token.totalSupply(), tokenAmount);
         collateralById[_competitionId][tokenAddress] -= paymentAmountWithFee;
 
@@ -239,27 +238,27 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     }
 
     function publishToUniswap(address tokenAddress) external nonReentrant {
-        uint256 totalCollateral;
+        uint256 totalCollateralFromAllTokens;
+        uint256 currentCollateral;
+        uint256 mintAmount;
         {
             uint256 _competitionId = competitionIds[tokenAddress];
             require(_competitionId != currentCompetitionId, "The competition is still active");
             address winnerToken = getWinnerByCompetitionId(_competitionId);
             require(winnerToken == tokenAddress, "Token address not winner");
-            totalCollateral = getCollateralByCompetitionId(_competitionId);
-            WETH.deposit{value: totalCollateral}();
+            currentCollateral = collateralById[_competitionId][tokenAddress];
+            totalCollateralFromAllTokens = getCollateralByCompetitionId(_competitionId);
+        }
+        {
+            uint256 numTokensPerEther = bondingCurve.computeBurningAmountFromRefund(currentCollateral, Token(tokenAddress).totalSupply(), 1 ether);
+            WETH.deposit{value: totalCollateralFromAllTokens}();
+            mintAmount= totalCollateralFromAllTokens * numTokensPerEther;
+            Token(tokenAddress).mint(address(this), mintAmount);
         }
 
-        // calulate winner token amount
-        uint256 contributionWithoutFee = (totalCollateral * FEE_DENOMINATOR) / (FEE_DENOMINATOR + feePercent);
-
-        uint256 winnerTokenAmount = bondingCurve.computeMintingAmountFromPrice(totalCollateral, Token(tokenAddress).totalSupply(), contributionWithoutFee);
-
-        Token(tokenAddress).mint(address(this), winnerTokenAmount);
-
-        // token creator will get liquidity pull tokenId
         (address pool, uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) = tokenAddress < address(WETH)
-            ? _addLiquidity(tokenAddress, winnerTokenAmount, address(WETH), totalCollateral, tokensCreators[tokenAddress])
-            : _addLiquidity(address(WETH), totalCollateral, tokenAddress, winnerTokenAmount, tokensCreators[tokenAddress]);
+            ? _addLiquidity(tokenAddress, mintAmount, address(WETH), totalCollateralFromAllTokens, address(this))
+            : _addLiquidity(address(WETH), totalCollateralFromAllTokens, tokenAddress, mintAmount, address(this));
 
         tokensPools[tokenAddress] = pool;
 
