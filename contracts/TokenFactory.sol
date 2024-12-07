@@ -252,36 +252,26 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         {
             uint256 numTokensPerEther = bondingCurve.computeBurningAmountFromRefund(currentCollateral, Token(tokenAddress).totalSupply(), 1 ether);
             WETH.deposit{value: totalCollateralFromAllTokens}();
-            mintAmount= totalCollateralFromAllTokens * numTokensPerEther;
+            mintAmount = totalCollateralFromAllTokens * numTokensPerEther;
             Token(tokenAddress).mint(address(this), mintAmount);
         }
-
         (address pool, uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) = tokenAddress < address(WETH)
             ? _addLiquidity(tokenAddress, mintAmount, address(WETH), totalCollateralFromAllTokens, address(this))
             : _addLiquidity(address(WETH), totalCollateralFromAllTokens, tokenAddress, mintAmount, address(this));
 
         tokensPools[tokenAddress] = pool;
-
         emit WinnerLiquidityAdded(tokenAddress, tokensCreators[tokenAddress], pool, msg.sender, tokenId, liquidity, amount0, amount1, block.timestamp);
     }
 
     function burnTokenAndMintWinner(address tokenAddress) external nonReentrant {
         uint256 _competitionId = competitionIds[tokenAddress];
-
         require(_competitionId != currentCompetitionId, "The competition is still active");
-
         address winnerToken = getWinnerByCompetitionId(_competitionId);
-
         require(winnerToken != tokenAddress, "Token address is winner");
-
         Token token = Token(tokenAddress);
-
         uint256 burnedAmount = token.balanceOf(msg.sender);
-
-        uint256 receivedETH = _sell(tokenAddress, burnedAmount, msg.sender, address(this));
-
-        uint256 mintedAmount = _buy(winnerToken, msg.sender, receivedETH);
-
-        emit BurnTokenAndMintWinner(msg.sender, tokenAddress, winnerToken, burnedAmount, receivedETH, mintedAmount, block.timestamp);
+        uint256 paymentAmountWithoutFee = _sell(tokenAddress, burnedAmount, msg.sender, address(this));
+        uint256 mintedAmount = _buy(winnerToken, msg.sender, paymentAmountWithoutFee);
+        emit BurnTokenAndMintWinner(msg.sender, tokenAddress, winnerToken, burnedAmount, paymentAmountWithoutFee, mintedAmount, block.timestamp);
     }
 }
