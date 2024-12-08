@@ -21,6 +21,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     BancorBondingCurve public bondingCurve;
     uint256 public feePercent; // bp
     uint256 public fee;
+    uint256 public feeWithdrawn;
 
     mapping(uint256 => address) public winners;
     mapping(uint256 => mapping(address => uint256)) public collateralById;
@@ -273,5 +274,12 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         uint256 paymentAmountWithoutFee = _sell(tokenAddress, burnedAmount, msg.sender, address(this));
         uint256 mintedAmount = _buy(winnerToken, msg.sender, paymentAmountWithoutFee);
         emit BurnTokenAndMintWinner(msg.sender, tokenAddress, winnerToken, burnedAmount, paymentAmountWithoutFee, mintedAmount, block.timestamp);
+    }
+
+    function withdrawFee() external onlyOwner {
+        uint256 feeWithdrawable = fee - feeWithdrawn > address(this).balance ? address(this).balance : fee - feeWithdrawn;
+        (bool success, ) = owner().call{value: feeWithdrawable}("");
+        require(success, "transfer failed");
+        feeWithdrawn += feeWithdrawable;
     }
 }
