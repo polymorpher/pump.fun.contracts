@@ -104,7 +104,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
 
     // Token functions
 
-    function createToken(string memory name, string memory symbol, string memory uri) external returns (address) {
+    function createToken(string memory name, string memory symbol, string memory uri) external returns (Token) {
         address tokenAddress = Clones.clone(tokenImplementation);
         Token token = Token(tokenAddress);
         token.initialize(name, symbol, uri, address(this));
@@ -116,7 +116,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
 
         emit TokenCreated(tokenAddress, name, symbol, uri, msg.sender, currentCompetitionId, block.timestamp);
 
-        return tokenAddress;
+        return token;
     }
 
     function buy(address tokenAddress) external payable nonReentrant inCompetition(tokenAddress) {
