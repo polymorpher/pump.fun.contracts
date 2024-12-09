@@ -156,14 +156,11 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
 
     function _sellReceivedAmount(address tokenAddress, uint256 amount) public view returns (uint256) {
         Token token = Token(tokenAddress);
+        require(amount <= token.totalSupply(), "amount exceeds supply");
         uint256 _competitionId = competitionIds[tokenAddress];
-
         uint256 receivedETH = bondingCurve.computeRefundForBurning(collateralById[_competitionId][tokenAddress], token.totalSupply(), amount);
-
-        // calculate fee
         uint256 _fee = calculateFee(receivedETH, feePercent);
         receivedETH -= _fee;
-
         return receivedETH;
     }
 
@@ -251,7 +248,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
             totalCollateralFromAllTokens = getCollateralByCompetitionId(_competitionId);
         }
         {
-            uint256 numTokensPerEther = bondingCurve.computeBurningAmountFromRefund(currentCollateral, Token(tokenAddress).totalSupply(), 1 ether);
+            uint256 numTokensPerEther = bondingCurve.computeMintingAmountFromPrice(currentCollateral, Token(tokenAddress).totalSupply(), 1 ether);
             WETH.deposit{value: totalCollateralFromAllTokens}();
             mintAmount = totalCollateralFromAllTokens * numTokensPerEther;
             Token(tokenAddress).mint(address(this), mintAmount);
