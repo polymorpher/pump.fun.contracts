@@ -250,7 +250,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         {
             uint256 numTokensPerEther = bondingCurve.computeMintingAmountFromPrice(currentCollateral, Token(tokenAddress).totalSupply(), 1 ether);
             WETH.deposit{value: totalCollateralFromAllTokens}();
-            mintAmount = (totalCollateralFromAllTokens / 1e18) * numTokensPerEther;
+            mintAmount = totalCollateralFromAllTokens * numTokensPerEther / 1e18;
             Token(tokenAddress).mint(address(this), mintAmount);
         }
         (address pool, uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) = tokenAddress < address(WETH)
