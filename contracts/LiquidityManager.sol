@@ -8,10 +8,12 @@ import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionMana
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import {UD60x18, ud} from "@prb/math/src/UD60x18.sol";
+import {mulDiv} from "@prb/math/src/Common.sol";
 import {Token} from "./Token.sol";
 
 interface IWETH is IERC20 {
     function deposit() external payable;
+
     function withdraw(uint) external;
 }
 
@@ -29,13 +31,15 @@ abstract contract LiquidityManager is IERC721Receiver, Ownable {
     INonfungiblePositionManager public nonfungiblePositionManager;
     IUniswapV3Factory public uniswapV3Factory;
 
+    error PoolNonExist();
+
     constructor(address _uniswapV3Factory, address _nonfungiblePositionManager, address _weth) Ownable(msg.sender) {
         uniswapV3Factory = IUniswapV3Factory(_uniswapV3Factory);
         nonfungiblePositionManager = INonfungiblePositionManager(_nonfungiblePositionManager);
         WETH = IWETH(_weth);
     }
 
-    function onERC721Received(address operator, address from, uint256 tokenId, bytes calldata) external returns (bytes4) {
+    function onERC721Received(address /*operator*/, address /*from*/, uint256 /*tokenId*/, bytes calldata) external pure returns (bytes4) {
         return IERC721Receiver.onERC721Received.selector;
     }
 
@@ -88,5 +92,44 @@ abstract contract LiquidityManager is IERC721Receiver, Ownable {
         });
 
         (tokenId, liquidity, amount0, amount1) = nonfungiblePositionManager.mint(params);
+    }
+
+    function getSqrtPriceX96(address tokenAddress) public view returns (uint160) {
+        address t0a = (tokenAddress < address(WETH)) ? tokenAddress : address(WETH);
+        address t1a = (tokenAddress < address(WETH)) ? address(WETH) : tokenAddress;
+        address pa = uniswapV3Factory.getPool(t0a, t1a, UNISWAP_FEE);
+        if (pa == address(0)) {
+            revert PoolNonExist();
+        }
+        (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3Pool(pa).slot0();
+        return sqrtPriceX96;
+    }
+
+    function getMintAmountPostPublish(uint256 collateralAmount, address tokenAddress) public view returns (uint256) {
+        // price = token1 / token0, i.e. how many token1 is equivalent to 1 unit of token0
+        uint160 sqrtPriceX96 = getSqrtPriceX96(tokenAddress);
+        // if sqrtPriceX96 is more than this, squaring it would overflow uint256
+        uint256 sqrtCeiling = 340275971719517849884101479065584693834;
+        if (tokenAddress > address(WETH)) {
+            // collateral is token 0, so token amount = collateralAmount * price
+            if (sqrtPriceX96 < sqrtCeiling) {
+                // just square it
+                uint256 priceX196 = uint256(sqrtPriceX96) ** 2;
+                return mulDiv(collateralAmount, priceX196, 2 ** 196);
+            } else {
+                // lower to price to X128 precision first
+                uint256 priceX128 = mulDiv(sqrtPriceX96, sqrtPriceX96, 2 ** 64);
+                return mulDiv(collateralAmount, priceX128, 2 ** 128);
+            }
+        } else {
+            // token amount = collateralAmount / price
+            if (sqrtPriceX96 < sqrtCeiling) {
+                uint256 priceX196 = uint256(sqrtPriceX96) ** 2;
+                return mulDiv(collateralAmount, 2 ** 196, priceX196);
+            } else {
+                uint256 priceX128 = mulDiv(sqrtPriceX96, sqrtPriceX96, 2 ** 64);
+                return mulDiv(collateralAmount, 2 ** 128, priceX128);
+            }
+        }
     }
 }
