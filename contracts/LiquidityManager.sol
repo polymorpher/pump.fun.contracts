@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+import "./libraries/TickMath.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 // import "@uniswap/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
@@ -26,12 +27,15 @@ abstract contract LiquidityManager is IERC721Receiver, Ownable {
     int24 private constant MIN_TICK = -887272;
     int24 private constant MAX_TICK = -MIN_TICK;
     int24 private constant TICK_SPACING = 60;
+    uint16 private constant MIN_OBSERVATION_CARDINALITY = 60;
+    uint32 private constant TWAP_DURATION = 120;
 
     IWETH internal immutable WETH;
     INonfungiblePositionManager public nonfungiblePositionManager;
     IUniswapV3Factory public uniswapV3Factory;
 
     error PoolNonExist();
+    error PoolTooNew();
 
     constructor(address _uniswapV3Factory, address _nonfungiblePositionManager, address _weth) Ownable(msg.sender) {
         uniswapV3Factory = IUniswapV3Factory(_uniswapV3Factory);
@@ -59,6 +63,7 @@ abstract contract LiquidityManager is IERC721Receiver, Ownable {
         require(pool == address(0), "Pool already created");
 
         pool = uniswapV3Factory.createPool(token0, token1, fee);
+        IUniswapV3Pool(pool).increaseObservationCardinalityNext(MIN_OBSERVATION_CARDINALITY);
     }
 
     function _addLiquidity(
@@ -94,7 +99,7 @@ abstract contract LiquidityManager is IERC721Receiver, Ownable {
         (tokenId, liquidity, amount0, amount1) = nonfungiblePositionManager.mint(params);
     }
 
-    function getSqrtPriceX96(address tokenAddress) public view returns (uint160) {
+    function getSpotSqrtPriceX96(address tokenAddress) public view returns (uint160) {
         address t0a = (tokenAddress < address(WETH)) ? tokenAddress : address(WETH);
         address t1a = (tokenAddress < address(WETH)) ? address(WETH) : tokenAddress;
         address pa = uniswapV3Factory.getPool(t0a, t1a, UNISWAP_FEE);
@@ -105,9 +110,34 @@ abstract contract LiquidityManager is IERC721Receiver, Ownable {
         return sqrtPriceX96;
     }
 
+    function getTwapSqrtPriceX96(address tokenAddress, uint32 duration) public view returns (uint160) {
+        if (duration == 0) {
+            return getSpotSqrtPriceX96(tokenAddress);
+        }
+        address t0a = (tokenAddress < address(WETH)) ? tokenAddress : address(WETH);
+        address t1a = (tokenAddress < address(WETH)) ? address(WETH) : tokenAddress;
+        address pa = uniswapV3Factory.getPool(t0a, t1a, UNISWAP_FEE);
+        if (pa == address(0)) {
+            revert PoolNonExist();
+        }
+        uint32[] memory obs = new uint32[](2);
+        obs[0] = duration;
+        obs[1] = 0;
+        (, , uint16 observationIndex, uint16 observationCardinality, , , ) = IUniswapV3Pool(pa).slot0();
+        (uint32 observationTimestamp, , , bool initialized) = IUniswapV3Pool(pa).observations((observationIndex + 1) % observationCardinality);
+        if (!initialized) {
+            (observationTimestamp, , , ) = IUniswapV3Pool(pa).observations(0);
+            if (block.timestamp - observationTimestamp < duration) {
+                revert PoolTooNew();
+            }
+        }
+        (int56[] memory tickCums, ) = IUniswapV3Pool(pa).observe(obs);
+        return TickMath.getSqrtRatioAtTick(int24((tickCums[1] - tickCums[0]) / int56(int32(duration))));
+    }
+
     function getMintAmountPostPublish(uint256 collateralAmount, address tokenAddress) public view returns (uint256) {
         // price = token1 / token0, i.e. how many token1 is equivalent to 1 unit of token0
-        uint160 sqrtPriceX96 = getSqrtPriceX96(tokenAddress);
+        uint160 sqrtPriceX96 = getTwapSqrtPriceX96(tokenAddress, TWAP_DURATION);
         // if sqrtPriceX96 is more than this, squaring it would overflow uint256
         uint256 sqrtCeiling = 340275971719517849884101479065584693834;
         if (tokenAddress > address(WETH)) {
