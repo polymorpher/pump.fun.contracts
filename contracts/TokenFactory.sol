@@ -96,12 +96,6 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         feePercent = _feePercent;
     }
 
-    function claimFee() external onlyOwner {
-        (bool success, ) = msg.sender.call{value: fee}(new bytes(0));
-        require(success, "ETH send failed");
-        fee = 0;
-    }
-
     // Token functions
 
     function createToken(string memory name, string memory symbol, string memory uri) external returns (Token) {
