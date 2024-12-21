@@ -11,6 +11,7 @@ import {BancorBondingCurve} from "./BancorBondingCurve.sol";
 import {Token} from "./Token.sol";
 
 contract TokenFactory is ReentrancyGuard, LiquidityManager {
+    uint256 public VERSION = 20241221;
     uint256 public constant FEE_DENOMINATOR = 10000;
     mapping(uint256 => address[]) public tokensByCompetitionId;
 
@@ -20,7 +21,7 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     address public immutable tokenImplementation;
     BancorBondingCurve public bondingCurve;
     uint256 public feePercent; // bp
-    uint256 public fee;
+    uint256 public feeAccumulated;
     uint256 public feeWithdrawn;
 
     mapping(uint256 => address) public winners;
@@ -45,8 +46,8 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         address indexed token,
         address indexed winnerToken,
         uint256 burnedAmount,
-        uint256 receivedETH,
         uint256 mintedAmount,
+        uint256 fee,
         uint256 timestamp
     );
 
@@ -123,18 +124,18 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         require(paymentAmount > 0, "ETH not enough");
 
         Token token = Token(tokenAddress);
-        (uint256 paymentWithoutFee, uint256 _fee) = _getCollateralAmountAndFee(paymentAmount);
+        (uint256 paymentWithoutFee, uint256 fee) = _getCollateralAmountAndFee(paymentAmount);
         uint256 tokenAmount = _getBuyTokenAmount(tokenAddress, paymentWithoutFee);
         collateralById[_competitionId][tokenAddress] += paymentWithoutFee;
-        fee += _fee;
+        feeAccumulated += fee;
         token.mint(receiver, tokenAmount);
-        emit TokenBuy(tokenAddress, paymentWithoutFee, tokenAmount, _fee, block.timestamp);
+        emit TokenBuy(tokenAddress, paymentWithoutFee, tokenAmount, fee, block.timestamp);
         return tokenAmount;
     }
 
-    function _getCollateralAmountAndFee(uint256 paymentAmount) internal view returns (uint256 paymentWithoutFee, uint256 _fee) {
-        _fee = calculateFee(paymentAmount, feePercent);
-        paymentWithoutFee = paymentAmount - _fee;
+    function _getCollateralAmountAndFee(uint256 paymentAmount) internal view returns (uint256 paymentWithoutFee, uint256 fee) {
+        fee = calculateFee(paymentAmount, feePercent);
+        paymentWithoutFee = paymentAmount - fee;
     }
 
     function _getBuyTokenAmount(address tokenAddress, uint256 paymentWithoutFee) internal view returns (uint256) {
@@ -153,8 +154,8 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         require(amount <= token.totalSupply(), "amount exceeds supply");
         uint256 _competitionId = competitionIds[tokenAddress];
         uint256 receivedETH = bondingCurve.computeRefundForBurning(collateralById[_competitionId][tokenAddress], token.totalSupply(), amount);
-        uint256 _fee = calculateFee(receivedETH, feePercent);
-        receivedETH -= _fee;
+        uint256 fee = calculateFee(receivedETH, feePercent);
+        receivedETH -= fee;
         return receivedETH;
     }
 
@@ -170,16 +171,16 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         uint256 paymentAmountWithFee = bondingCurve.computeRefundForBurning(collateralById[_competitionId][tokenAddress], token.totalSupply(), tokenAmount);
         collateralById[_competitionId][tokenAddress] -= paymentAmountWithFee;
 
-        uint256 _fee = calculateFee(paymentAmountWithFee, feePercent);
-        uint256 paymentAmountWithoutFee = paymentAmountWithFee - _fee;
-        fee += _fee;
+        uint256 fee = calculateFee(paymentAmountWithFee, feePercent);
+        uint256 paymentAmountWithoutFee = paymentAmountWithFee - fee;
+        feeAccumulated += fee;
         token.burn(from, tokenAmount);
         if (to != address(this)) {
             //slither-disable-next-line arbitrary-send-eth
             (bool success, ) = to.call{value: paymentAmountWithoutFee}(new bytes(0));
             require(success, "ETH send failed");
         }
-        emit TokenSell(tokenAddress, tokenAmount, paymentAmountWithoutFee, _fee, block.timestamp);
+        emit TokenSell(tokenAddress, tokenAmount, paymentAmountWithoutFee, fee, block.timestamp);
         return paymentAmountWithoutFee;
     }
 
@@ -230,7 +231,6 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
     }
 
     function publishToUniswap(address tokenAddress) external nonReentrant {
-        uint256 totalCollateralFromAllTokens;
         uint256 currentCollateral;
         uint256 mintAmount;
         {
@@ -239,17 +239,16 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
             address winnerToken = getWinnerByCompetitionId(_competitionId);
             require(winnerToken == tokenAddress, "Token address not winner");
             currentCollateral = collateralById[_competitionId][tokenAddress];
-            totalCollateralFromAllTokens = getCollateralByCompetitionId(_competitionId);
         }
         {
             uint256 numTokensPerEther = bondingCurve.computeMintingAmountFromPrice(currentCollateral, Token(tokenAddress).totalSupply(), 1 ether);
-            WETH.deposit{value: totalCollateralFromAllTokens}();
-            mintAmount = (totalCollateralFromAllTokens * numTokensPerEther) / 1e18;
+            WETH.deposit{value: currentCollateral}();
+            mintAmount = (currentCollateral * numTokensPerEther) / 1e18;
             Token(tokenAddress).mint(address(this), mintAmount);
         }
         (address pool, uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) = tokenAddress < address(WETH)
-            ? _addLiquidity(tokenAddress, mintAmount, address(WETH), totalCollateralFromAllTokens, address(this))
-            : _addLiquidity(address(WETH), totalCollateralFromAllTokens, tokenAddress, mintAmount, address(this));
+            ? _addLiquidity(tokenAddress, mintAmount, address(WETH), currentCollateral, address(this))
+            : _addLiquidity(address(WETH), currentCollateral, tokenAddress, mintAmount, address(this));
 
         tokensPools[tokenAddress] = pool;
         emit WinnerLiquidityAdded(tokenAddress, tokensCreators[tokenAddress], pool, msg.sender, tokenId, liquidity, amount0, amount1, block.timestamp);
@@ -262,18 +261,18 @@ contract TokenFactory is ReentrancyGuard, LiquidityManager {
         require(winnerToken != tokenAddress, "Token address is winner");
         Token token = Token(tokenAddress);
         uint256 burnedAmount = token.balanceOf(msg.sender);
-        uint256 paymentAmountWithoutFee = _sell(tokenAddress, burnedAmount, msg.sender, address(this));
-
-        uint256 mintedAmount = 0;
-        if (paymentAmountWithoutFee > 0) {
-            mintedAmount = _buy(winnerToken, msg.sender, paymentAmountWithoutFee);
-        }
-
-        emit BurnTokenAndMintWinner(msg.sender, tokenAddress, winnerToken, burnedAmount, paymentAmountWithoutFee, mintedAmount, block.timestamp);
+        uint256 feePrior = feeAccumulated;
+        uint256 userCollateral = _sell(tokenAddress, burnedAmount, msg.sender, address(this));
+        uint256 fee = feeAccumulated - feePrior;
+        uint256 netUserCollateral = userCollateral - fee;
+        uint256 mintAmount = getMintAmountPostPublish(netUserCollateral, tokenAddress);
+        Token(winnerToken).mint(msg.sender, mintAmount);
+        feeAccumulated += fee;
+        emit BurnTokenAndMintWinner(msg.sender, tokenAddress, winnerToken, burnedAmount, mintAmount, fee, block.timestamp);
     }
 
     function withdrawFee() external onlyOwner {
-        uint256 feeWithdrawable = fee - feeWithdrawn > address(this).balance ? address(this).balance : fee - feeWithdrawn;
+        uint256 feeWithdrawable = feeAccumulated - feeWithdrawn > address(this).balance ? address(this).balance : feeAccumulated - feeWithdrawn;
         (bool success, ) = owner().call{value: feeWithdrawable}("");
         require(success, "transfer failed");
         feeWithdrawn += feeWithdrawable;
