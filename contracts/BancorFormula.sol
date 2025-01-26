@@ -41,7 +41,7 @@ contract BancorFormula {
         UD60x18 b,
         uint32 w,
         UD60x18 p
-    ) internal view returns (UD60x18) {
+    ) internal pure returns (UD60x18) {
         if (isZero(s)) {
             revert ZeroSupply();
         }
@@ -82,7 +82,7 @@ contract BancorFormula {
      *
      * @return p    the amount of native tokens to be returned for the amount of contract token to be sold, in 18-decimal fixed point format (UD60x18)
      */
-    function calculateSaleReturn(UD60x18 s, UD60x18 b, uint32 w, UD60x18 k) internal view returns (UD60x18) {
+    function calculateSaleReturn(UD60x18 s, UD60x18 b, uint32 w, UD60x18 k) internal pure returns (UD60x18) {
         if (isZero(s)) {
             revert ZeroSupply();
         }

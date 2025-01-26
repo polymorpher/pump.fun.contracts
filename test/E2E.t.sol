@@ -141,6 +141,7 @@ contract E2ETest is Test {
         uint256 totalCollateralFromAllTokens = tf.getCollateralByCompetitionId(currentCompetitionId - 1);
         uint256 numTokensPerEther = bc.computeMintingAmountFromPrice(currentCollateral, ta.totalSupply(), 1 ether);
         uint256 mintAmount = (totalCollateralFromAllTokens * numTokensPerEther) / 1e18;
+        console.log("mintAmount", mintAmount);
 
         tf.publishToUniswap(address(ta));
 
@@ -148,7 +149,7 @@ contract E2ETest is Test {
         assertNotEq(tokenPool, address(0x0), 'Token pool address is 0x0');
 
         uint128 liquidity = IUniswapV3Pool(tokenPool).liquidity();
-
+        console.log("liquidity", liquidity);
         // TODO: check uniswap pool liquidity
         //assertEq(liquidity, totalCollateralFromAllTokens, 'Liquidity incorrect');
 

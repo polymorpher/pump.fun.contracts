@@ -18,8 +18,11 @@
     <mapping directory="$PROJECT_DIR$/lib/openzeppelin-contracts/lib/forge-std" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/lib/openzeppelin-contracts/lib/forge-std/lib/ds-test" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/lib/openzeppelin-contracts/lib/halmos-cheatcodes" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/lib/prb-math" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/lib/solady" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/lib/v2-core" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/lib/v2-periphery" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/lib/v3-core" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/lib/v3-periphery" vcs="Git" />
   </component>
 </project>

@@ -17,7 +17,7 @@ contract BancorBondingCurveDetail is Script {
         mintingByPriceIncremental();
     }
 
-    function mintingByPriceIncremental() public {
+    function mintingByPriceIncremental() view public {
         uint256 numIncrements = vm.envUint("NUM_INCREMENTS");
         uint256 b = 0;
         uint256 supply = 0;
@@ -47,7 +47,7 @@ contract BancorBondingCurveDetail is Script {
 
     }
 
-    function mintingByAmountIncremental() public {
+    function mintingByAmountIncremental() view public {
         uint256 numIncrements = vm.envUint("NUM_INCREMENTS");
         uint256 b = 0;
         uint256 supply = 0;
