@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {LiquidityManager} from "./LiquidityManager.sol";
@@ -58,9 +59,6 @@ contract TokenFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable, Ree
         uint256 timestamp
     );
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() initializer {}
-
     function initialize(
         address _tokenImplementation,
         address _uniswapV3Factory,
@@ -70,7 +68,6 @@ contract TokenFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable, Ree
         uint256 _feePercent
     ) public initializer {
         __Ownable_init();
-        __UUPSUpgradeable_init();
         __ReentrancyGuard_init();
         __LiquidityManager_init(_uniswapV3Factory, _nonfungiblePositionManager, _weth);
 
